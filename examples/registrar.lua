@@ -54,7 +54,6 @@ local function Make403Forbidden(req)
     "To: "       .. req:getHeader('To');
     "Call-ID: "  .. req:getHeader('Call-ID');
     "CSeq: "     .. req:getHeader('CSeq');
-    'WWW-Authenticate: Digest realm="' .. REALM .. '",nonce="' .. us.private_.gen.nonce() .. '",algorithm=MD5';
     "Content-Length: 0";
   }
   resp:addHeaderValueParameter("To",'tag', us.private_.gen.tag())
