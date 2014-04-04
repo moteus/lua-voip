@@ -1,6 +1,6 @@
-local split = require "split"
 local utils = require "voip.sip.impl.utils"
 local format = utils.format
+local split  = utils.split
 
 -------------------------------------------------------------------------------
 -- message class

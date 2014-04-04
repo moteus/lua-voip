@@ -5,6 +5,21 @@ local ALGO = {
   md5 = assert(md5.digest or md5.sumhexa);
 }
 
+local function split(str, sep, plain)
+  local b, res = 1, {}
+  while b <= #str do
+    local e, e2 = string.find(str, sep, b, plain)
+    if e then
+      table.insert(res, (string.sub(str, b, e-1)))
+      b = e2 + 1
+    else
+      table.insert(res, (string.sub(str, b)))
+      break
+    end
+  end
+  return res
+end
+
 local function format(s, tab)
   -- %{name:format}
   s =  s:gsub('%%%{([%w_][%w_]*)%:([-0-9%.]*[cdeEfgGiouxXsq])%}',
@@ -98,6 +113,7 @@ local function SipDigest(method, algo, user, password, uri, realm, nonce)
 end
 
 return {
+  split  = split;
   format = format;
   generators = {
     sequence = GreateSeqGenerator;
