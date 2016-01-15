@@ -8,20 +8,11 @@ local format = utils.format
 local SipCreateMsg do
 local REQ_MT = {}
 REQ_MT.__index = REQ_MT
-REQ_MT.__tostring = function(t)
-  local str = table.concat(t,'\r\n')
-
-  if str:find('\r\n\r\n', 1, true) then -- has message end
-    return str
-  end
-
-  return  str .. '\r\n'
-end
 
 SipCreateMsg = function(msg)
   local t
   if type(msg) == 'string' then
-    t = split(msg,"\r\n")
+    t = split(msg, "\r\n")
   else
     t = {}
     for k,v in ipairs(msg)do
@@ -33,10 +24,26 @@ SipCreateMsg = function(msg)
 
   local len = t:getHeader('Content-Length')
   if not len or len == '0' then
-    if t[#t] == '' then t[#t] = nil end
+    while t[#t] == '' do
+      t[#t] = nil
+    end
   end
 
   return t
+end
+
+function REQ_MT:__tostring()
+  if not self[1] then
+    return '\r\n\r\n'
+  end
+
+  local str = table.concat(self,'\r\n')
+
+  if str:find('\r\n\r\n', 1, true) then -- has message end
+    return str
+  end
+
+  return  str .. '\r\n'
 end
 
 local escape_lua_pattern
@@ -458,13 +465,13 @@ local function self_test()
   }
   assert(tostring(msg1) == tostring(msg2))
 
-  
   -- getRequestLine
   local msg = SipCreateMsg{"INVITE sip:1234@10.10.10.1 SIP/2.0"}
   local method, ruri, version = msg:getRequestLine()
   assert(method == "INVITE")
   assert(ruri == "sip:1234@10.10.10.1")
   assert(version == "SIP/2.0")
+  assert(tostring(msg) == ("INVITE sip:1234@10.10.10.1 SIP/2.0" .. "\r\n"))
 
   -- getRequestUriParameter
   local msg = SipCreateMsg{"INVITE sip:1234@10.10.10.1;user=phone SIP/2.0"}
