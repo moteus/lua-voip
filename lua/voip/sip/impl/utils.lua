@@ -10,10 +10,10 @@ local function split(str, sep, plain)
   while b <= #str do
     local e, e2 = string.find(str, sep, b, plain)
     if e then
-      table.insert(res, (string.sub(str, b, e-1)))
+      res[#res + 1] = string.sub(str, b, e-1)
       b = e2 + 1
     else
-      table.insert(res, (string.sub(str, b)))
+      res[#res + 1] = string.sub(str, b)
       break
     end
   end

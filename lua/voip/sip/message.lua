@@ -1,5 +1,5 @@
-local split = require "split"
-local utils = require "voip.sip.impl.utils"
+local utils  = require "voip.sip.impl.utils"
+local split  = utils.split
 local format = utils.format
 
 -------------------------------------------------------------------------------
