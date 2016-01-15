@@ -1,6 +1,6 @@
+local split = require "split"
 local utils = require "voip.sip.impl.utils"
 local format = utils.format
-local split  = utils.split
 
 -------------------------------------------------------------------------------
 -- message class
@@ -9,10 +9,12 @@ local SipCreateMsg do
 local REQ_MT = {}
 REQ_MT.__index = REQ_MT
 REQ_MT.__tostring = function(t)
-  local str = table.concat(t,'\r\n') .. '\r\n'
-  if str:find('\r\n\r\n',1,true) then -- has message end
+  local str = table.concat(t,'\r\n')
+
+  if str:find('\r\n\r\n', 1, true) then -- has message end
     return str
   end
+
   return  str .. '\r\n'
 end
 
@@ -26,8 +28,15 @@ SipCreateMsg = function(msg)
       t[#t+1] = v
     end
   end
-  if(t[#t] == '') then table.remove(t) end
-  return setmetatable(t,REQ_MT)
+
+  t = setmetatable(t, REQ_MT)
+
+  local len = t:getHeader('Content-Length')
+  if not len or len == '0' then
+    if t[#t] == '' then t[#t] = nil end
+  end
+
+  return t
 end
 
 local escape_lua_pattern
@@ -83,12 +92,24 @@ local function remove_param(str, name)
 end
 
 local function match_uri(str)
-  local pat_1 = [[(%w+):([A-Za-z0-9.+-]*)]]
+  local pat_1 = [[(%w+):([A-Za-z0-9.+-:]*)]]
   local pat_2 = [[(%w+):([A-Za-z0-9.+-]*@[A-Za-z0-9.+-:]*)]]
   local pat_3 = "<" .. pat_2 ..">"
   local pat_4 = "<" .. pat_2 .."[,;%s]+([^>]+)>"
+  local pat_5 = "<" .. pat_1 ..">"
+  local pat_6 = "<" .. pat_1 .."[,;%s]+([^>]+)>"
 
-  local scheme, uri, param = str:match(pat_4)
+  local scheme, uri, param
+
+  scheme, uri, param = str:match(pat_6)
+  if scheme then
+    return scheme, uri, param
+  end
+  scheme, uri = str:match(pat_5)
+  if scheme then
+    return scheme, uri
+  end
+  scheme, uri, param = str:match(pat_4)
   if scheme then
     return scheme, uri, param
   end
@@ -193,6 +214,11 @@ function REQ_MT:setResponseCode(status, reason)
   end
 end
 
+local function split_header(str)
+  local h,v = str:match("^([^:]+):%s*(.*)$")
+  return h,v
+end
+
 function REQ_MT:getHeader(name)
   local res = self:getHeaderValues(name)
   if res then
@@ -204,7 +230,7 @@ function REQ_MT:getHeaderValues(name)
   local res = {}
   local i = 2
   while(self[i] and self[i] ~= "")do
-    local h,v = self[i]:match("^([^:]+):%s*(.*)$")
+    local h,v = split_header(self[i])
     i = i + 1
     if(h:upper() == name:upper())then
       res[#res+1] = v
@@ -254,10 +280,13 @@ end
 
 function REQ_MT:addHeaderUriParameter(header,tag,value)
   local i = self:getHeader_idx_(header)
-  if not i then 
-    return i
-  end
-  local scheme,uri,param = match_uri(self[i])
+  if not i then return end
+
+  local _, hvalue = split_header(self[i])
+  if not hvalue then return end
+
+  local scheme,uri,param = match_uri(hvalue)
+
   if scheme then
     local pat = scheme .. ":" .. uri
     if param then
@@ -276,10 +305,9 @@ end
 function REQ_MT:modifyHeader(name,value)
   local i = self:getHeader_idx_(name)
   if not i then 
-    return false
+    return i
   end
   self[i] = name .. ": " .. value
-  return true
 end
 
 function REQ_MT:removeHeader(name)
@@ -305,11 +333,12 @@ function REQ_MT:removeHeaderValue(header,tag)
 end
 
 function REQ_MT:getData_idx_()
-  local res = {}
-  local i = 2
-  while(self[i] and self[i] ~= "")do
+  local i, res = 2, {}
+
+  while self[i] and #self[i] > 0 do
     i = i + 1
   end
+
   if (self[i] == '') and (self[i+1]) then
     return i + 1
   end
@@ -325,25 +354,30 @@ function REQ_MT:getContentBody(content_type)
 
   local clen = self:getHeader("Content-Length")
   if clen then clen = tonumber(clen) end
-  local body = table.concat(self, '\r\n', i) .. '\r\n'
+  local body = table.concat(self, '\r\n', i)
   return body, clen 
 end
 
 function REQ_MT:setContentBody(content_type, content_body)
-  local body_len = #table.concat(content_body, '\r\n') + 2
+  local body_len = #table.concat(content_body, '\r\n')
+
   local i = self:getData_idx_()
   if not i then table.insert(self, "")
   else for k = i, #self do self[k] = nil end end
 
+  for i, k in ipairs(content_body) do 
+    self[#self + 1] = k
+  end
+
+  if content_type == 'application/sdp' and self[#self] ~= '' then
+    self[#self + 1] = ''
+    body_len = body_len + 2
+  end
+
   self:removeHeader("Content-Type")
   self:addHeader("Content-Type", content_type)
-
   self:removeHeader("Content-Length")
   self:addHeader("Content-Length", body_len)
-
-  for _, k in ipairs(content_body) do 
-    table.insert(self, k)
-  end
 
   return body_len
 end
@@ -414,7 +448,17 @@ end --
 ---
 --
 local function self_test()
+  -- Optional EOL
+  local msg1 = SipCreateMsg{
+    "INVITE sip:12345678900@192.168.10.10 SIP/2.0";
+    "";
+  }
+  local msg2 = SipCreateMsg{
+    "INVITE sip:12345678900@192.168.10.10 SIP/2.0";
+  }
+  assert(tostring(msg1) == tostring(msg2))
 
+  
   -- getRequestLine
   local msg = SipCreateMsg{"INVITE sip:1234@10.10.10.1 SIP/2.0"}
   local method, ruri, version = msg:getRequestLine()
@@ -517,6 +561,24 @@ local function self_test()
   assert(msg[1] == "INVITE sip:1234@10.10.10.1 SIP/2.0")
   assert(msg[2] == "P-Asserted-Identity: <sip:1234@10.10.10.1;user=phone>")
 
+  -- addHeaderUriParameter
+  local msg = SipCreateMsg{
+    "SIP/2.0 200 OK";
+    "Contact: <sip:192.168.10.67:5060>";
+  }
+  msg:addHeaderUriParameter("Contact", "transport", "tcp")
+  assert(msg[1] == "SIP/2.0 200 OK")
+  assert(msg[2] == "Contact: <sip:192.168.10.67:5060;transport=tcp>")
+
+  -- addHeaderUriParameter
+  local msg = SipCreateMsg{
+    "SIP/2.0 200 OK";
+    "Contact: sip:192.168.10.67:5060";
+  }
+  msg:addHeaderUriParameter("Contact", "transport", "tcp")
+  assert(msg[1] == "SIP/2.0 200 OK")
+  assert(msg[2] == "Contact: <sip:192.168.10.67:5060;transport=tcp>")
+
   -- modifyHeader
   local msg = SipCreateMsg{
     'INVITE sip:1234@10.10.10.1 SIP/2.0';
@@ -590,9 +652,31 @@ local function self_test()
     "a=rtpmap:18 G729/8000";
     "a=rtpmap:101 telephone-event/8000";
     "a=fmtp:101 0-15";
+    "";
   }
   local sdp, sdp_len = msg:getContentBody('application/sdp')
   assert(sdp and (#sdp == sdp_len))
+
+  -- setContentBody
+  local msg = SipCreateMsg{
+    "INVITE sip:12345678900@192.168.10.10 SIP/2.0";
+  }
+  msg:setContentBody("application/sdp", {
+    "v=0";
+    "o=172.16.10.121 1334826930 1334826930 IN IP4 172.16.10.121";
+    "s=SomeVoipServer/1.3.4";
+    "c=IN IP4 172.16.10.121";
+    "t=0 0";
+    "m=audio 19904 RTP/AVP 18 101";
+    "a=ptime:20";
+    "a=rtpmap:18 G729/8000";
+    "a=rtpmap:101 telephone-event/8000";
+    "a=fmtp:101 0-15";
+  })
+  local len = msg:getHeader('Content-Length')
+  assert(tonumber(len) == 237)
+  local sdp, sdp_len = msg:getContentBody('application/sdp')
+  assert(sdp and (#sdp == 237))
   
   -- setContentBody
   local msg = SipCreateMsg{
@@ -619,9 +703,21 @@ local function self_test()
     "a=rtpmap:18 G729/8000";
     "a=rtpmap:101 telephone-event/8000";
     "a=fmtp:101 0-15";
+    "";
   }
   local sdp_len = msg:setContentBody('application/sdp', body)
   assert(sdp_len and sdp_len == #msg:getContentBody('application/sdp'))
+
+  -- setContentBody
+  local msg = SipCreateMsg{
+    "NOTIFY sip:192.168.10.67:5060 SIP/2.0";
+  }
+  local body = {
+    "http://fusionpbx.domain.local/app/provision/index.php?mac={mac}/OEM.htm";
+  }
+  local sdp_len = msg:setContentBody('application/url', body)
+  assert(sdp_len == 71)
+  assert(sdp_len and sdp_len == #msg:getContentBody('application/url'))
 
   -- getUri
   local msg = SipCreateMsg{
