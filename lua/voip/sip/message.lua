@@ -43,7 +43,7 @@ function REQ_MT:__tostring()
     return str
   end
 
-  return  str .. '\r\n'
+  return  str .. '\r\n\r\n'
 end
 
 local escape_lua_pattern
@@ -366,15 +366,20 @@ function REQ_MT:getContentBody(content_type)
 end
 
 function REQ_MT:setContentBody(content_type, content_body)
-  local body_len = #table.concat(content_body, '\r\n')
+  if type(content_body) == 'string' then
+    content_body = split(content_body, "\r\n")
+  end
 
   local i = self:getData_idx_()
   if not i then table.insert(self, "")
   else for k = i, #self do self[k] = nil end end
 
+  local body_len = 0
   for i, k in ipairs(content_body) do 
     self[#self + 1] = k
+    body_len = body_len + #k + 2
   end
+  if body_len > 0 then body_len = body_len - 2 end
 
   if content_type == 'application/sdp' and self[#self] ~= '' then
     self[#self + 1] = ''
@@ -452,6 +457,7 @@ end
 end --
 -------------------------------------------------------------------------------
 
+-- do return end
 ---
 --
 local function self_test()
@@ -471,12 +477,36 @@ local function self_test()
   assert(method == "INVITE")
   assert(ruri == "sip:1234@10.10.10.1")
   assert(version == "SIP/2.0")
-  assert(tostring(msg) == ("INVITE sip:1234@10.10.10.1 SIP/2.0" .. "\r\n"))
+
+  -- end of message without body
+  local msg = SipCreateMsg{"INVITE sip:1234@10.10.10.1 SIP/2.0"}
+  assert(tostring(msg) == ("INVITE sip:1234@10.10.10.1 SIP/2.0" .. "\r\n\r\n"))
+
+  local msg = SipCreateMsg{"INVITE sip:1234@10.10.10.1 SIP/2.0\r\n\r\n"}
+  assert(tostring(msg) == ("INVITE sip:1234@10.10.10.1 SIP/2.0" .. "\r\n\r\n"))
+
+  -- end of message with body
+  local msg = SipCreateMsg{"INVITE sip:1234@10.10.10.1 SIP/2.0"}
+  msg:setContentBody('text/plain', '0123456789')
+  local content = "Content-Type: text/plain\r\nContent-Length: 10\r\n\r\n0123456789"
+  assert(tostring(msg) == ("INVITE sip:1234@10.10.10.1 SIP/2.0" .. "\r\n" .. content))
+
+  -- end of message with body
+  local msg = SipCreateMsg{
+    "INVITE sip:1234@10.10.10.1 SIP/2.0",
+    "Content-Type: text/plain",
+    "Content-Length: 10",
+    "",
+    "0123456789",
+  }
+  local content = "Content-Type: text/plain\r\nContent-Length: 10\r\n\r\n0123456789"
+  assert(tostring(msg) == ("INVITE sip:1234@10.10.10.1 SIP/2.0" .. "\r\n" .. content))
 
   -- getRequestUriParameter
   local msg = SipCreateMsg{"INVITE sip:1234@10.10.10.1;user=phone SIP/2.0"}
   local userparam = msg:getRequestUriParameter("user")
   assert(userparam == 'phone')
+  
 
   -- setRequestUri
   local msg = SipCreateMsg{"INVITE sip:1234@10.10.10.1 SIP/2.0"}

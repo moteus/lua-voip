@@ -6,12 +6,25 @@ local ALGO = {
 }
 
 local function split(str, sep, plain)
-  local b, res = 1, {}
+  local b, res = 0, {}
+  sep = sep or '%s+'
+
+  assert(type(sep) == 'string')
+  assert(type(str) == 'string')
+
+  if #sep == 0 then
+    for i = 1, #str do
+      res[#res + 1] = string.sub(str, i, i)
+    end
+    return res
+  end
+
   while b <= #str do
     local e, e2 = string.find(str, sep, b, plain)
     if e then
       res[#res + 1] = string.sub(str, b, e-1)
       b = e2 + 1
+      if b > #str then res[#res + 1] = "" end
     else
       res[#res + 1] = string.sub(str, b)
       break
