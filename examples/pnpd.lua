@@ -58,6 +58,12 @@ local cli = uv.udp():bind(config.sua_interface, config.local_port or 0, function
   end
 
   LOCAL, LOCAL_PORT = cli:getsockname()
+
+  cli:start_recv(function(_, err, msg, flags, host, port)
+    if err then
+      return log.fatal('server recv: %s', tostring(err))
+    end
+  end)
 end)
 
 local srv = uv.udp():bind(IS_WINDOWS and config.pnp_interface or GROUP, PORT, {'reuseaddr'}, function(srv, err, host, port)
