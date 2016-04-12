@@ -6,8 +6,13 @@ local log = require "log".new('trace',
 )
 
 local config = {
-  local_ip = "192.168.1.25";
-  url      = "http://fusionpbx.domain.local/fusionpbx/app/provision/";
+  pnp_interface = "*";
+  sua_interface = "192.168.1.25";
+  url           = "http://fusionpbx.domain.local/fusionpbx/app/provision";
+  vendor        = {
+    grandstream = "${url}/cfg${mac}";
+    escene      = "${url}/";
+  };
 }
 
 local IS_WINDOWS = package.config:sub(1,1) == '\\'
@@ -27,7 +32,26 @@ local function find_mac_self_test()
   assert('00135E874B49' == find_mac(sip.new_message'SUBSCRIBE sip:MAC%3a00135E874B49@intern.snom.de SIP/2.0'))
 end
 
-local cli = uv.udp():bind(config.local_ip, config.local_port or 0, function(cli, err)
+local function apply_params(str, params)
+  return (string.gsub(str, "(%$%b{})",function(key)
+    key = key:sub(3,-2)
+    return params[key] or ''
+  end))
+end
+
+local function unquote(s)
+  if s then
+    if string.sub(s, 1, 1) == '"' then
+      s = string.sub(s, 2, -2)
+    end
+    s = (string.gsub(s, "%%(%x%x)",function(ch)
+      return (string.char(tonumber(ch, 16)))
+    end))
+  end
+  return s
+end
+
+local cli = uv.udp():bind(config.sua_interface, config.local_port or 0, function(cli, err)
   if err then
     log.fatal('Can not create client socket: %s', tostring(err))
     return uv.stop()
@@ -36,7 +60,7 @@ local cli = uv.udp():bind(config.local_ip, config.local_port or 0, function(cli,
   LOCAL, LOCAL_PORT = cli:getsockname()
 end)
 
-local srv = uv.udp():bind(IS_WINDOWS and config.local_ip or GROUP, PORT, {'reuseaddr'}, function(srv, err, host, port)
+local srv = uv.udp():bind(IS_WINDOWS and config.pnp_interface or GROUP, PORT, {'reuseaddr'}, function(srv, err, host, port)
   if err then
     log.fatal('Can not create server socket: %s', tostring(err))
     return uv.stop()
@@ -47,6 +71,11 @@ local srv = uv.udp():bind(IS_WINDOWS and config.local_ip or GROUP, PORT, {'reuse
     log.fatal('Can not add multicast membership: %s', tostring(err))
     return uv.stop()
   end
+
+  log.info("Server started on: " .. host .. ':' .. port)
+  log.info("SIP UA on : " .. LOCAL .. ':' .. LOCAL_PORT)
+  log.info("Listen in membership: " .. GROUP)
+  log.info("Provisioning URL: " .. config.url)
 
   srv:start_recv(function(_, err, msg, flags, host, port)
     if err then
@@ -74,18 +103,25 @@ local srv = uv.udp():bind(IS_WINDOWS and config.local_ip or GROUP, PORT, {'reuse
 
     local resp_ip, resp_port = host, port
 
-    local mac     = find_mac(req)
-    local vendor  = req:getHeaderValueParameter('Event', 'vendor')
-    local model   = req:getHeaderValueParameter('Event', 'model')
-    local version = req:getHeaderValueParameter('Event', 'version')
+    local params = {
+      url     = config.url;
+      mac     = find_mac(req);
+      vendor  = unquote(req:getHeaderValueParameter('Event', 'vendor'));
+      model   = unquote(req:getHeaderValueParameter('Event', 'model'));
+      version = unquote(req:getHeaderValueParameter('Event', 'version'));
+    }
+
+    local vendor = params.vendor and string.lower(params.vendor)
+    local url = vendor and config.vendor[vendor] or config.url
+    url = apply_params(url, params)
 
     log.info(
       "Get request from %s:%s - mac: %s, vendor: %s, model: %s, version: %s",
       host, port,
-      mac     or '----',
-      vendor  or '----',
-      model   or '----',
-      version or '----'
+      params.mac     or '----',
+      params.vendor  or '----',
+      params.model   or '----',
+      params.version or '----'
     )
 
     local resp = sip.new_message{
@@ -112,6 +148,9 @@ local srv = uv.udp():bind(IS_WINDOWS and config.local_ip or GROUP, PORT, {'reuse
       log.debug("SEND 200/OK")
     end)
 
+    local event = req:getHeader('Event') or "ua-profile"
+    event = string.match(event, "^([^;]*)")
+
     local resp = sip.new_message{
       "NOTIFY "              .. req:getUri('Contact') .. " SIP/2.0";
       "Via: "                .. req:getHeader('Via');
@@ -120,7 +159,7 @@ local srv = uv.udp():bind(IS_WINDOWS and config.local_ip or GROUP, PORT, {'reuse
       "To: "                 .. req:getHeader('To');
       "Call-ID: "            .. req:getHeader('Call-ID');
       "CSeq: "               .. "3" .. " NOTIFY";
-      "Event: "              .. req:getHeader('Event');
+      "Event: "              .. event;
       "Subscription-State: " .. "terminated;reason=timeout";
       "Max-Forwards: "       .. "20";
       "Expires: "            .. "0";
@@ -128,11 +167,11 @@ local srv = uv.udp():bind(IS_WINDOWS and config.local_ip or GROUP, PORT, {'reuse
     }
     resp:addHeaderUriParameter('Contact', 'transport', 'tcp')
     resp:addHeaderUriParameter('Contact', 'handler', 'dum')
-    resp:setContentBody("application/url", {config.url})
+    resp:setContentBody("application/url", url)
 
     log.info(
       "Send response to %s:%s - url: %s",
-      resp_ip, resp_port, config.url
+      resp_ip, resp_port, url
     )
 
     resp = tostring(resp)
