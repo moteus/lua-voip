@@ -158,12 +158,14 @@ function REQ_MT:getHeader_idx_(name, i)
 end
 
 function REQ_MT:getRequestLine()
-  return self[1]:match("^([%S]+)%s+([%S]+)%s+([Ss][Ii][Pp]/[%d.]+)$")
+  if self[1] then
+    return self[1]:match("^([%S]+)%s+([%S]+)%s+([Ss][Ii][Pp]/[%d.]+)$")
+  end
 end
 
 function REQ_MT:getRequestUriParameter(name)
   local _,ruri = self:getRequestLine()
-  local param = ruri:match(name .."=([^%s;]+)")
+  local param = ruri and ruri:match(name .."=([^%s;]+)")
   return param
 end
 
@@ -175,8 +177,10 @@ function REQ_MT:setRequestUri(uri)
 end
 
 function REQ_MT:getResponseLine()
-  local version, status, reason = self[1]:match("^([Ss][Ii][Pp]/[%d.]+) ([%S]+)%s+(.+)$")
-  return version, tonumber(status) or status, reason
+  if self[1] then
+    local version, status, reason = self[1]:match("^([Ss][Ii][Pp]/[%d.]+) ([%S]+)%s+(.+)$")
+    return version, tonumber(status) or status, reason
+  end
 end
 
 function REQ_MT:getResponseCode()
@@ -399,7 +403,7 @@ end
 -- Otherwise, false is returned. 
 function REQ_MT:isInitialInviteRequest()
   local method = self:getRequestLine()
-  if method:upper() ~= 'INVITE' then
+  if (not method) or (method:upper() ~= 'INVITE') then
     return nil
   end
 
@@ -506,7 +510,25 @@ local function self_test()
   local msg = SipCreateMsg{"INVITE sip:1234@10.10.10.1;user=phone SIP/2.0"}
   local userparam = msg:getRequestUriParameter("user")
   assert(userparam == 'phone')
+
+  -- message with body with eol
+  local msg = SipCreateMsg{
+    "INVITE sip:1234@10.10.10.1 SIP/2.0",
+    "Content-Type: text/plain",
+    "Content-Length: 20",
+    "",
+    "\r\n\r\n0123\r\n456789\r\n\r\n",
+  }
+  local content = "Content-Type: text/plain\r\nContent-Length: 20\r\n\r\n" .. "\r\n\r\n0123\r\n456789\r\n\r\n"
+  assert(tostring(msg) == ("INVITE sip:1234@10.10.10.1 SIP/2.0" .. "\r\n" .. content))
   
+  -- message with body with eol
+  local msg = SipCreateMsg{
+    "INVITE sip:1234@10.10.10.1 SIP/2.0"
+  }
+  msg:setContentBody('text/plain', "\r\n\r\n0123\r\n456789\r\n\r\n")
+  local content = "Content-Type: text/plain\r\nContent-Length: 20\r\n\r\n" .. "\r\n\r\n0123\r\n456789\r\n\r\n"
+  assert(tostring(msg) == ("INVITE sip:1234@10.10.10.1 SIP/2.0" .. "\r\n" .. content))
 
   -- setRequestUri
   local msg = SipCreateMsg{"INVITE sip:1234@10.10.10.1 SIP/2.0"}
@@ -806,6 +828,7 @@ local function self_test()
   local msg = SipCreateMsg(PING)
   assert(tostring(msg) == PING)
   assert(msg:isPing())
+  assert(nil == msg:getRequestLine())
 
 end
 
